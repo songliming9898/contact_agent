@@ -13,3 +13,39 @@ systemctl enable mysqld
 mysql -u root < init_database.sql
 或者 mysql -u root -p
 source init_database.sql
+
+
+#配置环境变量
+
+cp .env.example .env   # 如果有的话，或者直接创建
+
+
+#安装环境依赖库
+pip install -r backend/requirements.txt
+
+
+#创建数据目录+启动
+mkdir -p backend/data/contracts backend/data/json backend/data/chroma
+
+# 导入合同（如果 contracts/ 下有 .docx 文件）
+python backend/scripts/import_contracts.py --clear
+
+# 启动后端
+uvicorn backend.app.api_server:app --host 0.0.0.0 --port 8000 &
+
+
+git 上代码更新
+# 1. 拉取最新代码
+cd /root/con_agent
+git pull
+
+# 2. 安装依赖（不再需要 torch，秒装完）
+pip install chromadb
+
+# 3. 设置 API Key
+export DASHSCOPE_API_KEY= sk-ecabc478f6ea40c68ecfc896fa462f25                         sk-你的真实key
+
+# 4. 启动
+uvicorn backend.app.api_server:app --host 0.0.0.0 --port 8000
+
+

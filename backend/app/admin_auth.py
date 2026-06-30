@@ -5,7 +5,7 @@ import jwt
 from datetime import datetime, timedelta
 from typing import Optional
 
-from ..config import ADMIN_PASSWORD, JWT_SECRET_KEY, JWT_EXPIRE_HOURS
+from .config import ADMIN_PASSWORD, JWT_SECRET_KEY, JWT_EXPIRE_HOURS
 
 
 def verify_admin_password(password: str) -> bool:
