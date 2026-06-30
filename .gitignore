@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+
+# 数据目录
+data/
+*.db
+*.sqlite
+
+# ChromaDB
+chroma/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 上传的合同文件（敏感数据）
+contracts/uploads/
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/

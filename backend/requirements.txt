@@ -1,0 +1,31 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# LangChain
+langchain==0.2.0
+langchain-community==0.2.0
+langchain-core==0.2.0
+
+# 文档解析
+python-docx==1.1.0
+PyMuPDF==1.23.8
+
+# MySQL
+pymysql==1.1.0
+DBUtils==3.0.3
+
+# LLM (阿里云)
+dashscope==1.17.0
+
+# 后台认证
+PyJWT==2.8.0
+
+# 工具
+python-dotenv==1.0.0
+pydantic==2.7.0
+sse-starlette==1.8.2
+
+# 向量数据库 + Embedding
+chromadb==0.5.0
+sentence-transformers==2.7.0

@@ -1,0 +1,34 @@
+/* 全局样式 */
+:root {
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+body {
+  font-size: 14px;
+  color: #323233;
+  background: #f7f8fa;
+}
+
+/* Vant 组件微调 */
+.van-nav-bar {
+  background: #1989fa !important;
+}
+.van-nav-bar__title {
+  color: #fff !important;
+}
+.van-nav-bar .van-icon {
+  color: #fff !important;
+}
