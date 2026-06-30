@@ -146,43 +146,47 @@ class ContractParserAgent:
 
     def _validate_and_fix(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """校验和修复 JSON 数据"""
-        if "contract_subject" not in data:
-            data["contract_subject"] = {}
-        if "contract_date" not in data:
-            data["contract_date"] = {}
-        if "contract_amount" not in data:
-            data["contract_amount"] = {}
-        if "software_products" not in data:
-            data["software_products"] = []
-        if "hardware_products" not in data:
-            data["hardware_products"] = []
-        if "payment_terms" not in data:
-            data["payment_terms"] = {}
-        if "trial_period" not in data:
-            data["trial_period"] = {"has_trial": False}
-        if "after_sales_service" not in data:
-            data["after_sales_service"] = {"has_service": False}
-        if "key_clauses" not in data:
-            data["key_clauses"] = []
+        # 确保 dict 类型字段
+        dict_fields = [
+            "contract_subject", "contract_date", "contract_amount",
+            "payment_terms", "trial_period", "after_sales_service",
+        ]
+        for field in dict_fields:
+            if field not in data or not isinstance(data[field], dict):
+                data[field] = {}
 
+        # 确保 list 类型字段
+        list_fields = ["software_products", "hardware_products", "key_clauses"]
+        for field in list_fields:
+            if field not in data or not isinstance(data[field], list):
+                data[field] = []
+
+        # 试用期默认值
+        trial = data.get("trial_period", {})
+        if not isinstance(trial, dict):
+            trial = {}
+            data["trial_period"] = trial
+        trial["has_trial"] = bool(trial.get("has_trial", False))
+
+        # 售后服务默认值
+        service = data.get("after_sales_service", {})
+        if not isinstance(service, dict):
+            service = {}
+            data["after_sales_service"] = service
+        service["has_service"] = bool(service.get("has_service", False))
+
+        # 金额转换
         amount = data.get("contract_amount", {})
-        if amount and amount.get("total_amount"):
+        if isinstance(amount, dict) and amount.get("total_amount"):
             try:
                 amount["total_amount"] = float(amount["total_amount"])
             except (ValueError, TypeError):
                 amount["total_amount"] = None
 
+        # 付款分期
         payment = data.get("payment_terms", {})
-        if payment and not isinstance(payment.get("installments"), list):
+        if isinstance(payment, dict) and not isinstance(payment.get("installments"), list):
             payment["installments"] = []
-
-        trial = data.get("trial_period", {})
-        if trial:
-            trial["has_trial"] = bool(trial.get("has_trial", False))
-
-        service = data.get("after_sales_service", {})
-        if service:
-            service["has_service"] = bool(service.get("has_service", False))
 
         return data
 
