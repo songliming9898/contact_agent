@@ -43,7 +43,9 @@ logger = logging.getLogger(__name__)
 
 REACT_PROMPT = PromptTemplate.from_template("""你是一个专业的软件公司合同问数助手。你拥有以下工具来回答用户关于合同的问题。
 
-**可用工具**：
+**可用工具名称**: {tool_names}
+
+**可用工具详情**：
 {tools}
 
 **工具使用指南**：
