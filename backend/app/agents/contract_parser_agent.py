@@ -182,8 +182,88 @@ class ContractParserAgent:
                 logger.info(f"[ContractParser] 从文件名提取甲方: {subject['party_a']}")
 
     def _validate_and_fix(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """校验和修复 JSON 数据"""
-        # 确保 dict 类型字段
+        """校验和修复 JSON 数据，包括 LLM 自由发挥字段到标准 Schema 的映射"""
+        # ===== 字段映射：LLM 自由发挥 → 标准 Schema =====
+        # 1. parties → contract_subject
+        if "parties" in data and isinstance(data["parties"], dict):
+            subject = data.setdefault("contract_subject", {})
+            if isinstance(subject, dict):
+                for key in ("party_a", "party_b", "project_name"):
+                    if key in data["parties"] and not subject.get(key):
+                        subject[key] = data["parties"][key]
+
+        # 2. total_amount / contract_title → contract_amount / contract_subject
+        if "total_amount" in data and data["total_amount"] is not None:
+            amount = data.setdefault("contract_amount", {})
+            if isinstance(amount, dict) and not amount.get("total_amount"):
+                amount["total_amount"] = data["total_amount"]
+        if "currency" in data and isinstance(data.get("currency"), str):
+            amount = data.setdefault("contract_amount", {})
+            if isinstance(amount, dict) and not amount.get("currency"):
+                amount["currency"] = data["currency"]
+        if "contract_title" in data:
+            subject = data.setdefault("contract_subject", {})
+            if isinstance(subject, dict) and not subject.get("project_name"):
+                subject["project_name"] = data["contract_title"]
+
+        # 3. signing_date / delivery_date → contract_date
+        date_src = {}
+        for src_key, dst_key in [
+            ("signing_date", "sign_date"), ("effective_date", "start_date"),
+            ("delivery_date", None), ("acceptance_period", None),
+        ]:
+            if src_key in data and data[src_key] is not None:
+                date_src[src_key] = data[src_key]
+        if date_src:
+            dates = data.setdefault("contract_date", {})
+            if isinstance(dates, dict):
+                if "signing_date" in date_src and not dates.get("sign_date"):
+                    dates["sign_date"] = date_src["signing_date"]
+                if "effective_date" in date_src and not dates.get("start_date"):
+                    dates["start_date"] = date_src["effective_date"]
+
+        # 4. payment_schedule → payment_terms.installments
+        if "payment_schedule" in data and isinstance(data["payment_schedule"], list):
+            payment = data.setdefault("payment_terms", {})
+            if isinstance(payment, dict) and not payment.get("installments"):
+                payment["installments"] = []
+                for ps in data["payment_schedule"]:
+                    if isinstance(ps, dict):
+                        payment["installments"].append({
+                            "stage": ps.get("milestone", ""),
+                            "ratio": f"{ps.get('percentage', 0)}%",
+                            "amount": ps.get("amount"),
+                            "trigger": ps.get("condition", ""),
+                        })
+
+        # 5. final_payment_* → payment_terms
+        payment = data.setdefault("payment_terms", {})
+        if isinstance(payment, dict):
+            if "final_payment_amount" in data and not payment.get("final_payment_amount"):
+                payment["final_payment_amount"] = data["final_payment_amount"]
+            if "final_payment_condition" in data and not payment.get("final_payment_trigger"):
+                payment["final_payment_trigger"] = data["final_payment_condition"]
+
+        # 6. key_clauses_summary → key_clauses
+        if "key_clauses_summary" in data and isinstance(data["key_clauses_summary"], dict):
+            clauses = data.setdefault("key_clauses", [])
+            if isinstance(clauses, list) and not clauses:
+                for k, v in data["key_clauses_summary"].items():
+                    if v:
+                        clauses.append({"type": k, "summary": str(v)})
+
+        # 7. governing_law_and_dispute_resolution → key_clauses
+        if "governing_law_and_dispute_resolution" in data and data["governing_law_and_dispute_resolution"]:
+            clauses = data.setdefault("key_clauses", [])
+            if isinstance(clauses, list):
+                exists = any(c.get("type") == "争议解决" for c in clauses if isinstance(c, dict))
+                if not exists:
+                    clauses.append({
+                        "type": "争议解决",
+                        "summary": data["governing_law_and_dispute_resolution"]
+                    })
+
+        # ===== 类型修复 =====
         dict_fields = [
             "contract_subject", "contract_date", "contract_amount",
             "payment_terms", "trial_period", "after_sales_service",
@@ -192,7 +272,6 @@ class ContractParserAgent:
             if field not in data or not isinstance(data[field], dict):
                 data[field] = {}
 
-        # 确保 list 类型字段
         list_fields = ["software_products", "hardware_products", "key_clauses"]
         for field in list_fields:
             if field not in data or not isinstance(data[field], list):
