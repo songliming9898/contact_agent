@@ -8,6 +8,11 @@ Collection 设计：
 Embedding 统一走阿里云 DashScope text-embedding API，无需本地 GPU/模型。
 """
 
+# 修复 CentOS 7/8 自带 sqlite3 版本过低问题（ChromaDB 需要 >= 3.35.0）
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 import os
 import logging
 import time
