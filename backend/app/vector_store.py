@@ -22,7 +22,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 from chromadb.api.types import EmbeddingFunction, Embeddings
 
-from ..config import (
+from .config import (
     CHROMA_PERSIST_DIR,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
