@@ -2,9 +2,12 @@
 ContractAgent 配置文件 (重构版 - MySQL 存储)
 """
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# 从 backend/ 目录加载 .env（无论从哪个目录启动服务）
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_ENV_PATH)
 
 # ==================== 路径配置 ====================
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
