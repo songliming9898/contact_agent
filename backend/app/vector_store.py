@@ -1,56 +1,108 @@
 """
-ChromaDB 向量存储模块 — 双 Collection 操作
+ChromaDB 向量存储模块 — 双 Collection 操作（DashScope Embedding API 版）
 
 Collection 设计：
 - contracts_chunks：合同条款分块（含归一化标记 + 元数据）
 - contracts_tables：表格 Markdown 文本（独立 Collection）
+
+Embedding 统一走阿里云 DashScope text-embedding API，无需本地 GPU/模型。
 """
 
 import os
 import logging
+import time
 from typing import List, Dict, Any, Optional
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+from chromadb.api.types import EmbeddingFunction, Embeddings
 
 from ..config import (
     CHROMA_PERSIST_DIR,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
-    EMBEDDING_DEVICE,
     EMBEDDING_BATCH_SIZE,
     QUERY_INSTRUCTION,
+    DASHSCOPE_API_KEY,
 )
 
 logger = logging.getLogger(__name__)
+
+# ============================================================
+#  DashScope Embedding 封装（API 调用，无本地模型）
+# ============================================================
+
+class DashScopeEmbeddingFunction(EmbeddingFunction):
+    """
+    基于阿里云 DashScope text-embedding API 的 Embedding 函数。
+
+    使用 text-embedding-v2 模型（中文最优，1536维），
+    与 ChromaDB 原生接口兼容，无需本地 GPU/模型下载。
+    """
+
+    def __init__(
+        self,
+        api_key: str = DASHSCOPE_API_KEY,
+        model: str = "text-embedding-v2",
+        batch_size: int = EMBEDDING_BATCH_SIZE,
+    ):
+        self._api_key = api_key
+        self._model = model
+        self._batch_size = batch_size
+
+    def __call__(self, input: List[str]) -> Embeddings:
+        """批量编码文本列表 → 向量列表"""
+        if not input:
+            return []
+
+        all_embeddings = []
+        for i in range(0, len(input), self._batch_size):
+            batch = input[i : i + self._batch_size]
+            embeddings = self._embed_batch(batch)
+            all_embeddings.extend(embeddings)
+        return all_embeddings
+
+    def _embed_batch(self, texts: List[str]) -> List[List[float]]:
+        """调用 DashScope API 编码一批文本"""
+        import dashscope
+        from http import HTTPStatus
+
+        resp = dashscope.TextEmbedding.call(
+            model=self._model,
+            input=texts,
+            api_key=self._api_key,
+        )
+
+        if resp.status_code == HTTPStatus.OK:
+            return [emb["embedding"] for emb in resp.output["embeddings"]]
+        else:
+            logger.error(f"DashScope Embedding API 错误: code={resp.code}, msg={resp.message}")
+            # 返回零向量作为降级（维度 1536）
+            return [[0.0] * 1536 for _ in texts]
+
+    def encode_query(self, query: str) -> List[float]:
+        """编码单条查询文本（带 BGE 指令前缀）"""
+        return self._embed_batch([query])[0]
+
+    def encode_documents(self, texts: List[str]) -> List[List[float]]:
+        """编码文档列表"""
+        return self(list(texts))
+
 
 # ============================================================
 #  全局单例
 # ============================================================
 
 _chroma_client: Optional[chromadb.PersistentClient] = None
-_embedding_fn = None
+_embedding_fn: Optional[DashScopeEmbeddingFunction] = None
 
 
-def _get_embedding_fn():
-    """懒加载 Embedding 函数"""
+def get_embedding_fn() -> DashScopeEmbeddingFunction:
+    """获取 DashScope Embedding 函数（单例）"""
     global _embedding_fn
-    if _embedding_fn is not None:
-        return _embedding_fn
-
-    try:
-        from sentence_transformers import SentenceTransformer
-        logger.info(f"加载 Embedding 模型: {EMBEDDING_MODEL}")
-        _embedding_fn = SentenceTransformer(
-            EMBEDDING_MODEL,
-            device=EMBEDDING_DEVICE,
-        )
-        logger.info(f"Embedding 模型加载完成，维度={_embedding_fn.get_sentence_embedding_dimension()}")
-    except Exception as e:
-        logger.error(f"加载 Embedding 模型失败: {e}")
-        logger.warning("将使用 ChromaDB 内置的默认 Embedding 函数（效果可能不佳）")
-        _embedding_fn = None
-
+    if _embedding_fn is None:
+        _embedding_fn = DashScopeEmbeddingFunction()
+        logger.info("DashScope Embedding API 就绪 (text-embedding-v2, dim=1536)")
     return _embedding_fn
 
 
@@ -62,7 +114,6 @@ def get_chroma_client() -> chromadb.PersistentClient:
 
     persist_dir = CHROMA_PERSIST_DIR
     if not os.path.isabs(persist_dir):
-        # 相对于项目根目录
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         persist_dir = os.path.join(base, "data", "chroma")
 
@@ -85,21 +136,9 @@ COLLECTION_TABLES = "contracts_tables"
 
 
 def _get_or_create_collection(name: str) -> chromadb.Collection:
-    """获取或创建 Collection"""
+    """获取或创建 Collection（使用 DashScope Embedding）"""
     client = get_chroma_client()
-
-    # 获取 embedding function
-    ef = None
-    emb_model = _get_embedding_fn()
-    if emb_model is not None:
-        # 使用自定义 embedding function
-        class SentenceTransformerEF:
-            def __init__(self, model):
-                self._model = model
-            def __call__(self, input):
-                return self._model.encode(input, normalize_embeddings=True).tolist()
-
-        ef = SentenceTransformerEF(emb_model)
+    ef = get_embedding_fn()
 
     try:
         collection = client.get_collection(name=name, embedding_function=ef)
@@ -116,12 +155,10 @@ def _get_or_create_collection(name: str) -> chromadb.Collection:
 
 
 def get_chunks_collection() -> chromadb.Collection:
-    """获取 contracts_chunks Collection"""
     return _get_or_create_collection(COLLECTION_CHUNKS)
 
 
 def get_tables_collection() -> chromadb.Collection:
-    """获取 contracts_tables Collection"""
     return _get_or_create_collection(COLLECTION_TABLES)
 
 
@@ -144,7 +181,7 @@ def add_chunks(chunks: List[Dict[str, Any]]) -> int:
         return 0
 
     collection = get_chunks_collection()
-    emb_model = _get_embedding_fn()
+    ef = get_embedding_fn()
 
     ids = []
     documents = []
@@ -158,7 +195,7 @@ def add_chunks(chunks: List[Dict[str, Any]]) -> int:
         ids.append(chunk_id)
         documents.append(c.get("text", ""))
 
-        # 元数据：Chromadb 只接受 str/int/float/bool
+        # 元数据：ChromaDB 只接受 str/int/float/bool
         meta = {}
         for k, v in c.items():
             if k in ("chunk_id", "text"):
@@ -176,25 +213,14 @@ def add_chunks(chunks: List[Dict[str, Any]]) -> int:
     if not ids:
         return 0
 
-    # 如果使用自定义 Embedding，手动编码
-    if emb_model is not None:
-        embeddings = emb_model.encode(
-            documents,
-            normalize_embeddings=True,
-            batch_size=EMBEDDING_BATCH_SIZE,
-        ).tolist()
-        collection.add(
-            ids=ids,
-            documents=documents,
-            metadatas=metadatas,
-            embeddings=embeddings,
-        )
-    else:
-        collection.add(
-            ids=ids,
-            documents=documents,
-            metadatas=metadatas,
-        )
+    # DashScope API 编码
+    embeddings = ef.encode_documents(documents)
+    collection.add(
+        ids=ids,
+        documents=documents,
+        metadatas=metadatas,
+        embeddings=embeddings,
+    )
 
     logger.info(f"写入 contracts_chunks: {len(ids)} 条")
     return len(ids)
@@ -207,20 +233,12 @@ def add_tables(
 ) -> int:
     """
     批量写入表格 Markdown 到 contracts_tables。
-
-    Args:
-        markdown_texts: 表格 Markdown 文本列表
-        contract_id: 合同编号
-        table_jsons: 表格 JSON 结构列表（作为元数据存储）
-
-    Returns:
-        写入的表格数量
     """
     if not markdown_texts:
         return 0
 
     collection = get_tables_collection()
-    emb_model = _get_embedding_fn()
+    ef = get_embedding_fn()
 
     ids = []
     documents = []
@@ -238,24 +256,13 @@ def add_tables(
             meta["context"] = table_jsons[i].get("context", "")[:500]
         metadatas.append(meta)
 
-    if emb_model is not None:
-        embeddings = emb_model.encode(
-            documents,
-            normalize_embeddings=True,
-            batch_size=EMBEDDING_BATCH_SIZE,
-        ).tolist()
-        collection.add(
-            ids=ids,
-            documents=documents,
-            metadatas=metadatas,
-            embeddings=embeddings,
-        )
-    else:
-        collection.add(
-            ids=ids,
-            documents=documents,
-            metadatas=metadatas,
-        )
+    embeddings = ef.encode_documents(documents)
+    collection.add(
+        ids=ids,
+        documents=documents,
+        metadatas=metadatas,
+        embeddings=embeddings,
+    )
 
     logger.info(f"写入 contracts_tables: {len(ids)} 条")
     return len(ids)
@@ -264,6 +271,26 @@ def add_tables(
 # ============================================================
 #  语义检索
 # ============================================================
+
+def _build_where(
+    contract_id: Optional[str] = None,
+    party_a: Optional[str] = None,
+    party_b: Optional[str] = None,
+) -> Optional[Dict]:
+    """构建 ChromaDB where 过滤条件"""
+    conditions = []
+    if contract_id:
+        conditions.append({"contract_id": contract_id})
+    if party_a:
+        conditions.append({"party_a": party_a})
+    if party_b:
+        conditions.append({"party_b": party_b})
+    if len(conditions) == 1:
+        return conditions[0]
+    elif len(conditions) > 1:
+        return {"$and": conditions}
+    return None
+
 
 def search_chunks(
     query: str,
@@ -274,70 +301,21 @@ def search_chunks(
 ) -> List[Dict[str, Any]]:
     """
     在 contracts_chunks 中语义检索。
-
-    Args:
-        query: 查询文本
-        n_results: 返回结果数
-        contract_id: 限定合同编号
-        party_a: 限定甲方
-        party_b: 限定乙方
-
-    Returns:
-        [
-            {
-                "chunk_id": "...",
-                "text": "...",
-                "section_title": "...",
-                "contract_id": "...",
-                "party_a": "...",
-                "party_b": "...",
-                "semantic_tags": "...",
-                "distance": 0.123,
-            },
-            ...
-        ]
     """
     collection = get_chunks_collection()
-    emb_model = _get_embedding_fn()
+    ef = get_embedding_fn()
+    where = _build_where(contract_id, party_a, party_b)
 
-    # 构建过滤条件
-    where = None
-    conditions = []
-    if contract_id:
-        conditions.append({"contract_id": contract_id})
-    if party_a:
-        conditions.append({"party_a": party_a})
-    if party_b:
-        conditions.append({"party_b": party_b})
-    if len(conditions) == 1:
-        where = conditions[0]
-    elif len(conditions) > 1:
-        where = {"$and": conditions}
+    # DashScope Embedding 查询编码
+    query_embedding = ef.encode_query(QUERY_INSTRUCTION + query)
 
-    # BGE 模型 Query 指令前缀
-    query_with_instruction = QUERY_INSTRUCTION + query
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=min(n_results, collection.count()),
+        where=where,
+        include=["documents", "metadatas", "distances"],
+    )
 
-    # 查询
-    if emb_model is not None:
-        query_embedding = emb_model.encode(
-            [query_with_instruction],
-            normalize_embeddings=True,
-        ).tolist()
-        results = collection.query(
-            query_embeddings=query_embedding,
-            n_results=min(n_results, collection.count()),
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
-    else:
-        results = collection.query(
-            query_texts=[query_with_instruction],
-            n_results=min(n_results, collection.count()),
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
-
-    # 格式化结果
     formatted = []
     if results and results.get("ids") and results["ids"][0]:
         for i, doc_id in enumerate(results["ids"][0]):
@@ -367,40 +345,19 @@ def search_tables(
 ) -> List[Dict[str, Any]]:
     """
     在 contracts_tables 中语义检索表格。
-
-    Args:
-        query: 查询文本
-        n_results: 返回结果数
-        contract_id: 限定合同编号
-
-    Returns:
-        表格检索结果列表
     """
     collection = get_tables_collection()
-    emb_model = _get_embedding_fn()
-
+    ef = get_embedding_fn()
     where = {"contract_id": contract_id} if contract_id else None
 
-    query_with_instruction = QUERY_INSTRUCTION + query
+    query_embedding = ef.encode_query(QUERY_INSTRUCTION + query)
 
-    if emb_model is not None:
-        query_embedding = emb_model.encode(
-            [query_with_instruction],
-            normalize_embeddings=True,
-        ).tolist()
-        results = collection.query(
-            query_embeddings=query_embedding,
-            n_results=min(n_results, collection.count()),
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
-    else:
-        results = collection.query(
-            query_texts=[query_with_instruction],
-            n_results=min(n_results, collection.count()),
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=min(n_results, collection.count()),
+        where=where,
+        include=["documents", "metadatas", "distances"],
+    )
 
     formatted = []
     if results and results.get("ids") and results["ids"][0]:
@@ -428,36 +385,19 @@ def search_tables(
 def delete_contract_chunks(contract_id: str) -> int:
     """
     删除指定合同的所有 chunks（contracts_chunks + contracts_tables）。
-
-    Args:
-        contract_id: 合同编号
-
-    Returns:
-        删除的条目总数
     """
     total = 0
 
-    # 删除 contracts_chunks 中的条目
-    try:
-        chunks_col = get_chunks_collection()
-        existing = chunks_col.get(where={"contract_id": contract_id})
-        if existing and existing.get("ids"):
-            chunks_col.delete(ids=existing["ids"])
-            total += len(existing["ids"])
-            logger.info(f"删除 contracts_chunks: {len(existing['ids'])} 条 (contract_id={contract_id})")
-    except Exception as e:
-        logger.warning(f"删除 contracts_chunks 失败: {e}")
-
-    # 删除 contracts_tables 中的条目
-    try:
-        tables_col = get_tables_collection()
-        existing = tables_col.get(where={"contract_id": contract_id})
-        if existing and existing.get("ids"):
-            tables_col.delete(ids=existing["ids"])
-            total += len(existing["ids"])
-            logger.info(f"删除 contracts_tables: {len(existing['ids'])} 条 (contract_id={contract_id})")
-    except Exception as e:
-        logger.warning(f"删除 contracts_tables 失败: {e}")
+    for col_fn in [get_chunks_collection, get_tables_collection]:
+        try:
+            col = col_fn()
+            existing = col.get(where={"contract_id": contract_id})
+            if existing and existing.get("ids"):
+                col.delete(ids=existing["ids"])
+                total += len(existing["ids"])
+                logger.info(f"删除 {len(existing['ids'])} 条 (contract_id={contract_id})")
+        except Exception as e:
+            logger.warning(f"删除失败: {e}")
 
     return total
 

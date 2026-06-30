@@ -26,6 +26,5 @@ python-dotenv==1.0.0
 pydantic==2.7.0
 sse-starlette==1.8.2
 
-# 向量数据库 + Embedding
+# 向量数据库（Embedding 走 DashScope API，无需本地模型）
 chromadb==0.5.0
-sentence-transformers==2.7.0

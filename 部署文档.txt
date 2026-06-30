@@ -1,0 +1,15 @@
+cd /root
+git clone https://github.com/songliming9898/contact_agent.git con_agent
+cd con_agent
+
+
+安装系统依赖
+# 安装 MySQL 8.0
+yum install -y mysql-server
+systemctl start mysqld
+systemctl enable mysqld
+
+# 初始化数据库
+mysql -u root < init_database.sql
+或者 mysql -u root -p
+source init_database.sql

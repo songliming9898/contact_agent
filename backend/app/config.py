@@ -27,13 +27,12 @@ MYSQL_POOL_SIZE = int(os.getenv("MYSQL_POOL_SIZE", "5"))
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "sk-xxxxxxxxxxxx")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen-plus")  # qwen-turbo / qwen-plus / qwen-max
 
-# ==================== Embedding 配置 ====================
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-base-zh-v1.5")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
-EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
-EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "8"))
+# ==================== Embedding 配置（DashScope API，无需本地模型） ====================
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-v2")  # DashScope 1536维
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
+EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
 
-# BGE 模型 Query 指令前缀
+# Query 指令前缀（DashScope 兼容 BGE 风格）
 QUERY_INSTRUCTION = "为这个查询生成表示以用于检索相关合同条款："
 
 # ==================== ChromaDB 配置 ====================
