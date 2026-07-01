@@ -13,7 +13,7 @@
       <div v-if="messages.length === 0" class="welcome">
         <div class="welcome-icon">📋</div>
         <div class="welcome-title">合同智能问数助手</div>
-        <div class="welcome-desc">基于 LangChain Agent，支持结构化查询和语义检索</div>
+        <div class="welcome-desc">合同问答助手，快速解决合同相关问题</div>
         <div class="welcome-tips">
           <div class="tip-title">试试这样问：</div>
           <div
