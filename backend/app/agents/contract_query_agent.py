@@ -284,18 +284,7 @@ class ContractQueryAgent:
                 yield fallback
                 return
 
-            # 流式输出工具调用过程
-            for step in intermediate_steps:
-                action = step[0]
-                observation = step[1]
-
-                yield f"\n🔍 **查询中**: {action.tool}\n"
-                obs_str = str(observation)
-                if len(obs_str) > 500:
-                    obs_str = obs_str[:500] + "..."
-                yield f"📊 **结果**:\n{obs_str}\n\n"
-
-            # 流式输出最终答案
+            # 流式输出最终答案（跳过工具调用过程，只显示结果）
             if output:
                 sentences = output.replace('\n', '\n').split('\n')
                 for sentence in sentences:
