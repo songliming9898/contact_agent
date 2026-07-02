@@ -95,10 +95,11 @@ def _mysql_get_history(session_id: str) -> List[Dict]:
         # 反转为时间正序
         messages = []
         for row in reversed(rows):
+            created = row.get("created_at") if isinstance(row, dict) else row[3]
             messages.append({
-                "role": row[0],
-                "content": row[1],
-                "time": row[3].isoformat() if isinstance(row[3], datetime) else str(row[3]),
+                "role": row["role"] if isinstance(row, dict) else row[0],
+                "content": row["content"] if isinstance(row, dict) else row[1],
+                "time": created.isoformat() if isinstance(created, datetime) else str(created),
             })
         return messages
     except Exception as e:
@@ -121,12 +122,13 @@ def _mysql_save_messages(session_id: str, title: str, messages: List[Dict]):
             (session_id, title, len(messages), len(messages)),
         )
 
-        # 2. 获取当前最大 seq
+        # 2. 获取当前最大 seq（兼容 DictCursor 和普通 cursor）
         cursor.execute(
-            "SELECT COALESCE(MAX(seq), 0) FROM chat_messages WHERE session_id = %s",
+            "SELECT COALESCE(MAX(seq), 0) AS max_seq FROM chat_messages WHERE session_id = %s",
             (session_id,),
         )
-        max_seq = cursor.fetchone()[0]
+        row = cursor.fetchone()
+        max_seq = row["max_seq"] if isinstance(row, dict) else row[0]
 
         # 3. 批量插入新消息
         for i, msg in enumerate(messages):
@@ -174,16 +176,27 @@ def _mysql_list_sessions() -> List[Dict]:
         cursor.close()
         conn.close()
 
-        return [
-            {
-                "session_id": row[0],
-                "title": row[1],
-                "message_count": row[2],
-                "created_at": row[3].isoformat() if isinstance(row[3], datetime) else str(row[3]),
-                "updated_at": row[4].isoformat() if isinstance(row[4], datetime) else str(row[4]),
-            }
-            for row in rows
-        ]
+        result = []
+        for row in rows:
+            if isinstance(row, dict):
+                created = row.get("created_at")
+                updated = row.get("updated_at")
+                result.append({
+                    "session_id": row["session_id"],
+                    "title": row["title"],
+                    "message_count": row["message_count"],
+                    "created_at": created.isoformat() if isinstance(created, datetime) else str(created),
+                    "updated_at": updated.isoformat() if isinstance(updated, datetime) else str(updated),
+                })
+            else:
+                result.append({
+                    "session_id": row[0],
+                    "title": row[1],
+                    "message_count": row[2],
+                    "created_at": row[3].isoformat() if isinstance(row[3], datetime) else str(row[3]),
+                    "updated_at": row[4].isoformat() if isinstance(row[4], datetime) else str(row[4]),
+                })
+        return result
     except Exception as e:
         logger.error(f"[SessionManager] 获取会话列表失败: {e}")
         return []

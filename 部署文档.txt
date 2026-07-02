@@ -18,7 +18,8 @@ source init_database.sql
 #配置环境变量
 
 cp .env.example .env   # 如果有的话，或者直接创建
-
+虚拟环境
+source convenv/bin/activate
 
 #安装环境依赖库
 pip install -r backend/requirements.txt
@@ -29,6 +30,10 @@ mkdir -p backend/data/contracts backend/data/json backend/data/chroma
 
 # 导入合同（如果 contracts/ 下有 .docx 文件）
 python backend/scripts/import_contracts.py --clear
+
+# 先清掉上次失败的数据，重新导入
+python backend/scripts/import_contracts.py --clear --dir contracts/split_contracts
+
 
 # 启动后端
 uvicorn backend.app.api_server:app --host 0.0.0.0 --port 8000 &
@@ -43,9 +48,47 @@ git pull
 pip install chromadb
 
 # 3. 设置 API Key
-export DASHSCOPE_API_KEY= sk-ecabc478f6ea40c68ecfc896fa462f25                         sk-你的真实key
-
+export DASHSCOPE_API_KEY=sk-ecabc478f6ea40c68ecfc896fa462f25                      
 # 4. 启动
 uvicorn backend.app.api_server:app --host 0.0.0.0 --port 8000
+
+
+# 本地测试
+curl http://localhost:8000/api/chat/sync -X POST -H "Content-Type: application/json" -d '{"question":"你好"}'
+
+curl -X POST http://localhost:8000/api/chat/sync \
+  -H "Content-Type: application/json" \
+  -d '{"question": "列出所有合同"}'
+
+curl -X POST http://localhost:8000/api/chat/sync \
+  -H "Content-Type: application/json" \
+  -d '{"question": "宏达技术有哪些合同？总金额是多少？"}'
+
+
+cd /root/con_agent
+git pull origin master
+
+
+
+
+
+cd /opt/con_agent/con_agent
+git pull
+python backend/scripts/import_contracts.py --clear --dir contracts/split_contracts
+
+
+cd /opt/con_agent/con_agent
+git pull origin master
+# 重启后端（后台）
+
+
+pkill -f uvicorn
+export PYTHONPATH=/opt/con_agent/con_agent
+nohup uvicorn backend.app.api_server:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
+
+
+
+
+
 
 
