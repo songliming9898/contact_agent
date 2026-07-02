@@ -2,6 +2,9 @@
   <div class="chat-view">
     <!-- 顶部导航栏 -->
     <van-nav-bar title="合同问数助手" fixed>
+      <template #left>
+        <van-icon name="add-o" size="20" @click="newChat" />
+      </template>
       <template #right>
         <van-icon name="setting-o" size="20" @click="goAdmin" />
       </template>
@@ -93,6 +96,9 @@ const loading = ref(false)
 const messagesRef = ref(null)
 const inputRef = ref(null)
 
+// V1.1: 会话管理
+const sessionId = ref(null)  // 当前会话ID
+
 // 推荐问题
 const tips = [
   '合同总金额最高的三个合同是什么？',
@@ -110,6 +116,12 @@ function renderMarkdown(text) {
   } catch {
     return text.replace(/\n/g, '<br>')
   }
+}
+
+// 新建对话
+function newChat() {
+  messages.value = []
+  sessionId.value = null
 }
 
 // 发送消息
@@ -132,20 +144,25 @@ function sendMessage(text) {
 
   scrollToBottom()
 
-  // 流式请求
+  // 流式请求（V1.1: 传递 sessionId）
   streamChat(
     question,
+    sessionId.value,
     // onMessage
     (chunk) => {
       aiMsg.content += chunk
       aiMsg.loading = false
       scrollToBottom()
     },
-    // onDone
-    () => {
+    // onDone (V1.1: 首次提问时获取后端返回的 sessionId)
+    (newSessionId) => {
       aiMsg.loading = false
       loading.value = false
       scrollToBottom()
+      // 首次对话时保存 sessionId
+      if (newSessionId && !sessionId.value) {
+        sessionId.value = newSessionId
+      }
     },
     // onError
     (error) => {

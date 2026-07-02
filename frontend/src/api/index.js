@@ -8,20 +8,21 @@ const apiClient = axios.create({
 // ==================== 智能问数 ====================
 
 /**
- * 流式聊天（SSE）
+ * 流式聊天（SSE）— V1.1 支持 session_id
  * @param {string} question - 用户问题
+ * @param {string} sessionId - 会话ID
  * @param {function} onMessage - 接收消息回调
- * @param {function} onDone - 完成回调
+ * @param {function} onDone - 完成回调(sessionId)
  * @param {function} onError - 错误回调
  */
-export function streamChat(question, onMessage, onDone, onError) {
+export function streamChat(question, sessionId, onMessage, onDone, onError) {
   const baseURL = import.meta.env.VITE_API_BASE || ''
   const url = `${baseURL}/api/chat`
 
   fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, session_id: sessionId }),
   })
     .then(async (response) => {
       if (!response.ok) {
@@ -47,6 +48,16 @@ export function streamChat(question, onMessage, onDone, onError) {
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6)
+            // V1.1: done 事件可能包含 session_id
+            if (data.startsWith('{') && data.includes('"session_id"')) {
+              try {
+                const doneData = JSON.parse(data)
+                onDone(doneData.session_id)
+              } catch {
+                onDone()
+              }
+              return
+            }
             if (data === '[DONE]') {
               onDone()
               return
@@ -59,7 +70,7 @@ export function streamChat(question, onMessage, onDone, onError) {
       // 处理剩余 buffer
       if (buffer.startsWith('data: ')) {
         const data = buffer.slice(6)
-        if (data !== '[DONE]') {
+        if (data !== '[DONE]' && !data.startsWith('{')) {
           onMessage(data)
         }
       }
@@ -73,8 +84,8 @@ export function streamChat(question, onMessage, onDone, onError) {
 /**
  * 同步聊天（备用）
  */
-export async function syncChat(question) {
-  const response = await apiClient.post('/api/chat/sync', { question })
+export async function syncChat(question, sessionId) {
+  const response = await apiClient.post('/api/chat/sync', { question, session_id: sessionId })
   return response.data
 }
 

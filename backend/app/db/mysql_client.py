@@ -161,6 +161,34 @@ DDL_STATEMENTS = [
         FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关键条款';
     """,
+
+    # === V1.1 多轮对话记忆 ===
+
+    # 会话表
+    """
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        session_id    VARCHAR(64) PRIMARY KEY COMMENT '会话唯一ID',
+        title         VARCHAR(200) DEFAULT '' COMMENT '会话标题（首条问题摘要）',
+        message_count INT DEFAULT 0 COMMENT '总消息数',
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        is_active     TINYINT(1) DEFAULT 1 COMMENT '是否活跃'
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='聊天会话表';
+    """,
+
+    # 聊天消息表
+    """
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+        session_id    VARCHAR(64) NOT NULL COMMENT '会话ID',
+        role          ENUM('user', 'ai') NOT NULL COMMENT '角色',
+        content       TEXT NOT NULL COMMENT '消息内容',
+        seq           INT NOT NULL COMMENT '消息序号（保证顺序）',
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_session_seq (session_id, seq),
+        FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='聊天消息表';
+    """,
 ]
 
 

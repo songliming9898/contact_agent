@@ -17,10 +17,11 @@ Agent2: 智能问数 Agent (LangChain Tool-Calling Agent) — 重构版
   delete_contract  : 删除合同（MySQL + ChromaDB 删）
 """
 import logging
-from typing import AsyncIterator, Dict, Any
+from typing import AsyncIterator, Dict, Any, List, Optional
 
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_community.chat_models import ChatTongyi
 
 from ..config import DASHSCOPE_API_KEY, LLM_MODEL
@@ -175,6 +176,24 @@ class ContractQueryAgent:
             return_intermediate_steps=True,  # 改为 True，检查是否真的调用了工具
         )
 
+    def _format_history(self, chat_history: Optional[List[Dict]]) -> List[BaseMessage]:
+        """
+        将前端传来的历史消息列表转为 LangChain 消息格式
+        输入：[{"role":"user","content":"..."}, {"role":"ai","content":"..."}]
+        输出：[HumanMessage(...), AIMessage(...)]
+        """
+        if not chat_history:
+            return []
+        messages = []
+        for msg in chat_history:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                messages.append(HumanMessage(content=content))
+            elif role in ("ai", "assistant"):
+                messages.append(AIMessage(content=content))
+        return messages
+
     def _is_fake_no_data(self, output: str) -> bool:
         """检测 LLM 是否编造了'无数据'答案（而非工具真实返回）"""
         for pattern in self.NO_DATA_PATTERNS:
@@ -204,10 +223,14 @@ class ContractQueryAgent:
             logger.error(f"[QueryAgent] 兜底查询失败: {e}")
             return f"查询出错: {str(e)}"
 
-    def query(self, question: str) -> str:
+    def query(self, question: str, chat_history: Optional[List[Dict]] = None) -> str:
         """同步查询（非流式），带兜底检测"""
         try:
-            result = self.agent_executor.invoke({"input": question})
+            history = self._format_history(chat_history)
+            result = self.agent_executor.invoke({
+                "input": question,
+                "chat_history": history,
+            })
             output = result.get("output", "抱歉，我无法回答这个问题。")
             intermediate_steps = result.get("intermediate_steps", [])
 
@@ -224,11 +247,12 @@ class ContractQueryAgent:
             logger.error(f"[QueryAgent] 查询出错: {e}")
             return f"查询出错: {str(e)}"
 
-    async def query_stream(self, question: str) -> AsyncIterator[str]:
+    async def query_stream(self, question: str, chat_history: Optional[List[Dict]] = None) -> AsyncIterator[str]:
         """流式查询（SSE）"""
         try:
+            history = self._format_history(chat_history)
             async for event in self.agent_executor.astream_events(
-                {"input": question},
+                {"input": question, "chat_history": history},
                 version="v2",
             ):
                 kind = event.get("event", "")
@@ -260,14 +284,15 @@ class ContractQueryAgent:
             except Exception as e2:
                 yield f"查询出错: {str(e2)}"
 
-    async def query_stream_simple(self, question: str) -> AsyncIterator[str]:
+    async def query_stream_simple(self, question: str, chat_history: Optional[List[Dict]] = None) -> AsyncIterator[str]:
         """
         简化版流式查询 — 先同步执行 Agent，再流式输出结果
-        更稳定，适合 Demo
+        更稳定，适合 Demo。V1.1 增加 chat_history 支持多轮对话。
         """
         try:
+            history = self._format_history(chat_history)
             result = self.agent_executor.invoke(
-                {"input": question},
+                {"input": question, "chat_history": history},
                 return_only_outputs=False,
             )
 

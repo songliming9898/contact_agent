@@ -1,9 +1,13 @@
 """
-ContractAgent API 服务 — 重构版 (MySQL 存储, v4.2)
+ContractAgent API 服务 — V1.1 (多轮对话记忆)
 
 端点：
-  /api/chat             智能问数（SSE流式）
+  /api/chat             智能问数（SSE流式，支持session_id）
   /api/chat/sync        智能问数（同步）
+  /api/chat/new         创建新会话
+  /api/chat/sessions    会话列表
+  /api/chat/{id}/history 会话历史
+  /api/chat/{id}        删除会话
   /api/admin/login      后台登录
   /api/admin/upload     批量上传合同（→ insert_contract tool → MySQL）
   /api/admin/documents  文档列表
@@ -19,7 +23,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -38,6 +42,13 @@ from .agents.data_layer import (
     dao_query_sum_amount,
 )
 from .db.mysql_client import init_db
+from .session_manager import (
+    create_session,
+    get_history,
+    save_messages,
+    delete_session,
+    list_sessions,
+)
 
 # 日志配置
 logging.basicConfig(
@@ -70,10 +81,12 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     question: str
+    session_id: Optional[str] = None  # V1.1: 会话ID，不传则自动创建
 
 
 class ChatResponse(BaseModel):
     answer: str
+    session_id: Optional[str] = None  # V1.1: 返回会话ID
 
 
 class LoginRequest(BaseModel):
@@ -118,20 +131,38 @@ async def verify_admin(request: Request):
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """智能问数接口（SSE 流式返回）"""
+    """智能问数接口（SSE 流式返回），V1.1 支持多轮对话记忆"""
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
 
+    # 获取或创建 session_id
+    session_id = request.session_id or create_session()
+
+    # 读取历史
+    history = get_history(session_id)
+
+    # 用于收集完整 AI 回复
+    ai_full_response = []
+
     async def event_generator():
+        nonlocal ai_full_response
         try:
-            async for chunk in contract_query_agent.query_stream_simple(request.question):
+            async for chunk in contract_query_agent.query_stream_simple(
+                request.question,
+                chat_history=history,
+            ):
+                ai_full_response.append(chunk)
                 yield {
                     "event": "message",
                     "data": chunk,
                 }
+            # 保存本轮对话到 Redis + MySQL
+            full_answer = "".join(ai_full_response)
+            save_messages(session_id, request.question, full_answer)
+
             yield {
                 "event": "done",
-                "data": "[DONE]",
+                "data": json.dumps({"status": "done", "session_id": session_id}),
             }
         except Exception as e:
             logger.error(f"/api/chat 错误: {e}")
@@ -149,12 +180,46 @@ async def chat_sync(request: ChatRequest):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
 
+    session_id = request.session_id or create_session()
+    history = get_history(session_id)
+
     try:
-        answer = contract_query_agent.query(request.question)
-        return ChatResponse(answer=answer)
+        answer = contract_query_agent.query(request.question, chat_history=history)
+        save_messages(session_id, request.question, answer)
+        return ChatResponse(answer=answer, session_id=session_id)
     except Exception as e:
         logger.error(f"/api/chat/sync 错误: {e}")
-        return ChatResponse(answer=f"查询出错: {str(e)}")
+        return ChatResponse(answer=f"查询出错: {str(e)}", session_id=session_id)
+
+
+# --- 会话管理（V1.1 新增） ---
+
+@app.post("/api/chat/new")
+async def chat_new():
+    """创建新会话"""
+    session_id = create_session()
+    return {"session_id": session_id}
+
+
+@app.get("/api/chat/sessions")
+async def chat_sessions():
+    """获取会话列表"""
+    sessions = list_sessions()
+    return {"sessions": sessions}
+
+
+@app.get("/api/chat/{session_id}/history")
+async def chat_history(session_id: str):
+    """获取会话历史"""
+    messages = get_history(session_id)
+    return {"session_id": session_id, "messages": messages}
+
+
+@app.delete("/api/chat/{session_id}")
+async def chat_delete(session_id: str):
+    """删除会话"""
+    delete_session(session_id)
+    return {"message": "已删除"}
 
 
 # --- 后台管理 ---
